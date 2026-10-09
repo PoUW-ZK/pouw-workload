@@ -18,7 +18,7 @@ jobs:
     name: ci-ok
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Detect project
         id: detect
@@ -29,7 +29,7 @@ jobs:
             echo "::notice::Dockerfile does not exist yet, nothing to publish."
           fi
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: steps.detect.outputs.python == 'true'
         with:
           python-version: "3.12"
