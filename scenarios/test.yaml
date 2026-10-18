@@ -1,0 +1,6 @@
+name: test
+target_rps: 10
+duration_secs: 5
+circuit_distribution:
+  Groth16: 0.5
+  PLONK: 0.5
