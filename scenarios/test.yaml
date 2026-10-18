@@ -1,6 +1,7 @@
 name: test
-target_rps: 10
-duration_secs: 5
-circuit_distribution:
+arrival_model: Poisson
+target_rps: 50
+duration_secs: 10
+task_distribution:
   Groth16: 0.5
   PLONK: 0.5

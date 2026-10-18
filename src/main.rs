@@ -9,7 +9,7 @@ use std::{
 
 use clap::Parser;
 use rand::Rng;
-use scenario::{Scenario, WorkloadTask};
+use scenario::{ArrivalModel, Scenario, WorkloadTask};
 use uuid::Uuid;
 
 use crate::client::NodeClient;
@@ -32,6 +32,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("target_rps must be greater than zero".into());
     }
 
+    match scenario.arrival_model {
+        ArrivalModel::Uniform => {}
+        ArrivalModel::Poisson | ArrivalModel::Bursts => {
+            tracing::warn!(
+                "Poisson and Bursts arrival models are not yet implemented; using Uniform"
+            );
+        }
+        ArrivalModel::Waves => {
+            tracing::warn!("Waves arrival model is not yet implemented; using Uniform");
+        }
+    }
+
     let client = NodeClient::new(String::new());
     let request_interval = Duration::from_secs_f64(1.0 / scenario.target_rps as f64);
     let end_time = Instant::now() + Duration::from_secs(scenario.duration_secs);
@@ -39,11 +51,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while Instant::now() < end_time {
         let circuit_type = choose_circuit_type(&scenario, &mut rng)
-            .ok_or("circuit_distribution must contain a positive percentage")?;
+            .ok_or("task_distribution must contain a positive percentage")?;
         let task = WorkloadTask {
             task_id: Uuid::new_v4(),
+            proof_system: circuit_type.clone(),
             circuit_type,
-            payload: String::new(),
+            circuit_size: rng.random_range(1_000..=10_000),
+            fee: rng.random_range(1..=1_000),
+            client_id: "load-generator-1".to_string(),
         };
 
         client.submit_task(&task).await?;
@@ -60,7 +75,7 @@ fn choose_circuit_type<R: Rng + ?Sized>(
     rng: &mut R,
 ) -> Option<String> {
     let total_percentage: f64 = scenario
-        .circuit_distribution
+        .task_distribution
         .values()
         .filter(|percentage| **percentage > 0.0)
         .sum();
@@ -71,7 +86,7 @@ fn choose_circuit_type<R: Rng + ?Sized>(
     let threshold = rng.random_range(0.0..total_percentage);
     let mut cumulative = 0.0;
 
-    for (circuit_type, percentage) in &scenario.circuit_distribution {
+    for (circuit_type, percentage) in &scenario.task_distribution {
         if *percentage > 0.0 {
             cumulative += percentage;
             if threshold < cumulative {
