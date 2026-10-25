@@ -3,6 +3,7 @@
 build/
 *.class
 out/
+target/
 
 # Python (e2e tests, notebooks)
 __pycache__/
