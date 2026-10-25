@@ -26,6 +26,10 @@ public final class LightNodeClient {
         this(baseUrl, new ObjectMapper(), Duration.ofSeconds(10), 2);
     }
 
+    public LightNodeClient(String baseUrl, Duration requestTimeout) {
+        this(baseUrl, new ObjectMapper(), requestTimeout, 2);
+    }
+
     LightNodeClient(
             String baseUrl,
             ObjectMapper objectMapper,
