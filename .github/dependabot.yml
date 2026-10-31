@@ -8,6 +8,8 @@ updates:
       actions:
         patterns: ["*"]
 
+  # Minor and patch updates come together, every major one in its own PR: a
+  # major version may change the API (Javalin 7 broke the build in #57)
   - package-ecosystem: gradle
     directory: /
     schedule:
@@ -15,6 +17,7 @@ updates:
     groups:
       dependencies:
         patterns: ["*"]
+        update-types: [minor, patch]
 
   # Base images of the Dockerfile
   - package-ecosystem: docker

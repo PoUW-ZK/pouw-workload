@@ -16,8 +16,9 @@ public final class Main {
                 Duration.ofMillis(config.timeoutMs())
         );
 
-        Javalin.create()
-                .get("/health", context -> context.json(Map.of("status", "UP")))
+        // Javalin 7: routes are declared in the config
+        Javalin.create(javalin -> javalin.routes.get("/health",
+                        context -> context.json(Map.of("status", "UP"))))
                 .start(8000);
 
         System.out.println("Java L1 Workload Generator Initialized");
