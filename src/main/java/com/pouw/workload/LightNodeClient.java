@@ -1,13 +1,19 @@
 package com.pouw.workload;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 
@@ -46,27 +52,35 @@ public final class LightNodeClient {
     }
 
     public CompletableFuture<ChainHead> getChainHead() {
-        return get("/chain/head", ChainHead.class);
+        return get("/v1/blocks/head", ChainHead.class);
+    }
+
+    public CompletableFuture<ChainHead> getBlockHeader(long height) {
+        return get("/v1/blocks/" + height + "/header", ChainHead.class);
     }
 
     public CompletableFuture<Block> getBlock(long height) {
-        return get("/block/" + height, Block.class);
+        return get("/v1/blocks/" + height, Block.class);
     }
 
     public CompletableFuture<Balance> getBalance(String address) {
-        return get("/account/" + encodePathSegment(address) + "/balance", Balance.class);
+        return getAccount(address).thenApply(account -> new Balance(account.balance()));
     }
 
     public CompletableFuture<Nonce> getNonce(String address) {
-        return get("/account/" + encodePathSegment(address) + "/nonce", Nonce.class);
+        return getAccount(address).thenApply(account -> new Nonce(account.nonce()));
     }
 
     public CompletableFuture<TransactionStatus> getTransactionStatus(String transactionId) {
-        return get("/tx/" + encodePathSegment(transactionId) + "/status", TransactionStatus.class);
+        return get("/v1/txs/" + encodePathSegment(transactionId), TransactionStatus.class);
     }
 
-    public CompletableFuture<ProofTaskStatus> getProofTaskStatus(String taskId) {
-        return get("/proof-task/" + encodePathSegment(taskId) + "/status", ProofTaskStatus.class);
+    public CompletableFuture<ProofTaskStatus> getProofTaskStatus(String transactionId) {
+        return get("/v1/txs/" + encodePathSegment(transactionId), ProofTaskStatus.class);
+    }
+
+    private CompletableFuture<AccountView> getAccount(String address) {
+        return get("/v1/accounts/" + encodePathSegment(address), AccountView.class);
     }
 
     private <T> CompletableFuture<T> get(String path, Class<T> responseType) {
@@ -144,19 +158,34 @@ public final class LightNodeClient {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("path segment must not be blank");
         }
-        return value;
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
-    public record ChainHead(long height, String hash) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ChainHead(String id, BlockHeader header) {
+        public long height() {
+            return header.height();
+        }
+
+        public String hash() {
+            return id;
+        }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BlockHeader(long height) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record Block(
-            long height,
-            String hash,
-            String previousHash,
-            long timestamp,
-            java.util.List<String> txs
+            String id,
+            BlockHeader header,
+            List<JsonNode> txs,
+            @JsonProperty("proof_txs") List<JsonNode> proofTxs
     ) {
+        public long height() {
+            return header.height();
+        }
     }
 
     public record Balance(long balance) {
@@ -165,10 +194,23 @@ public final class LightNodeClient {
     public record Nonce(long nonce) {
     }
 
-    public record TransactionStatus(String status, Long blockHeight) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record AccountView(String address, long balance, long nonce) {
     }
 
-    public record ProofTaskStatus(String status, String proof) {
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record TransactionStatus(
+            String status,
+            @JsonProperty("height") Long blockHeight
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record ProofTaskStatus(
+            String status,
+            @JsonProperty("height") Long blockHeight,
+            String proof
+    ) {
     }
 
     public static final class NodeApiException extends RuntimeException {

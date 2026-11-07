@@ -1,0 +1,22 @@
+name: example
+duration_seconds: 30
+rate_per_second: 10
+arrival_model: poisson
+burst_period_seconds: 20
+max_concurrency: 128
+min_height: 1
+max_height: 100
+addresses:
+  - replace-with-valid-address
+transaction_ids:
+  - replace-with-valid-transaction-id
+proof_task_ids:
+  - replace-with-proof-request-transaction-id
+operation_mix:
+  chain_head: 1
+  block_header: 1
+  block: 1
+  balance: 1
+  nonce: 1
+  transaction_status: 1
+  proof_task_status: 1
