@@ -41,13 +41,35 @@ public final class WorkloadScenarioRunner {
                     executor::submitNext
             ).get(scenario.durationSeconds() + 5, TimeUnit.SECONDS);
             executor.awaitCompletion(Duration.ofSeconds(10));
-            return new RunResult(scheduled.scheduledArrivals(), executor.snapshot());
+            return new RunResult(
+                    scheduled.scheduledArrivals(),
+                    scheduled.durationNanos(),
+                    executor.snapshot()
+            );
         }
     }
 
     public record RunResult(
             long scheduledArrivals,
+            long measuredDurationNanos,
             Map<ReadOperation, ReadOperationExecutor.OperationMetrics> operations
     ) {
+        public long completedRequests() {
+            return operations.values().stream()
+                    .mapToLong(ReadOperationExecutor.OperationMetrics::completed)
+                    .sum();
+        }
+
+        public double offeredRequestsPerSecond() {
+            return requestsPerSecond(scheduledArrivals);
+        }
+
+        public double completedRequestsPerSecond() {
+            return requestsPerSecond(completedRequests());
+        }
+
+        private double requestsPerSecond(long requests) {
+            return requests * 1_000_000_000d / measuredDurationNanos;
+        }
     }
 }
