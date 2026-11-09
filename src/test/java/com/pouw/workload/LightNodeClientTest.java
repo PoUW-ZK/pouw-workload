@@ -37,39 +37,39 @@ class LightNodeClientTest {
 
     @Test
     void readsAllSupportedEndpoints() throws Exception {
-        server.stubFor(get("/chain/head").willReturn(okJson("""
-                {"height":100,"hash":"0xabc..."}
+        server.stubFor(get("/v1/blocks/head").willReturn(okJson("""
+                {"id":"blk:abc","header":{"height":100}}
                 """)));
-        server.stubFor(get("/block/100").willReturn(okJson("""
-                {"height":100,"hash":"0xabc...","previousHash":"0xdef...",
-                 "timestamp":1700000000,"txs":[]}
+        server.stubFor(get("/v1/blocks/100/header").willReturn(okJson("""
+                {"id":"blk:abc","header":{"height":100}}
                 """)));
-        server.stubFor(get("/account/alice/balance").willReturn(okJson("""
-                {"balance":5000}
+        server.stubFor(get("/v1/blocks/100").willReturn(okJson("""
+                {"id":"blk:abc","header":{"height":100},"txs":[],"proof_txs":[]}
                 """)));
-        server.stubFor(get("/account/alice/nonce").willReturn(okJson("""
-                {"nonce":3}
+        server.stubFor(get("/v1/accounts/alice").willReturn(okJson("""
+                {"address":"alice","balance":5000,"nonce":3}
                 """)));
-        server.stubFor(get("/tx/tx-1/status").willReturn(okJson("""
-                {"status":"CONFIRMED","blockHeight":100}
+        server.stubFor(get("/v1/txs/tx-1").willReturn(okJson("""
+                {"status":"included","height":100}
                 """)));
-        server.stubFor(get("/proof-task/task-1/status").willReturn(okJson("""
-                {"status":"COMPLETED","proof":"0x123..."}
+        server.stubFor(get("/v1/txs/task-1").willReturn(okJson("""
+                {"status":"included","height":100,"proof":"MTIz"}
                 """)));
 
         assertEquals(100, client.getChainHead().get(2, TimeUnit.SECONDS).height());
+        assertEquals(100, client.getBlockHeader(100).get(2, TimeUnit.SECONDS).height());
         assertEquals(0, client.getBlock(100).get(2, TimeUnit.SECONDS).txs().size());
         assertEquals(5000, client.getBalance("alice").get(2, TimeUnit.SECONDS).balance());
         assertEquals(3, client.getNonce("alice").get(2, TimeUnit.SECONDS).nonce());
-        assertEquals("CONFIRMED",
+        assertEquals("included",
                 client.getTransactionStatus("tx-1").get(2, TimeUnit.SECONDS).status());
-        assertEquals("0x123...",
+        assertEquals("MTIz",
                 client.getProofTaskStatus("task-1").get(2, TimeUnit.SECONDS).proof());
     }
 
     @Test
     void reportsNotFoundResponse() {
-        server.stubFor(get("/block/999").willReturn(notFound()));
+        server.stubFor(get("/v1/blocks/999").willReturn(notFound()));
 
         CompletableFuture<LightNodeClient.Block> result = client.getBlock(999);
 
@@ -84,11 +84,11 @@ class LightNodeClientTest {
 
     @Test
     void sendAsyncDoesNotBlockCallerDuringDelayedResponse() throws Exception {
-        server.stubFor(get("/chain/head").willReturn(
+        server.stubFor(get("/v1/blocks/head").willReturn(
                 aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withFixedDelay(300)
-                        .withBody("{\"height\":100,\"hash\":\"0xabc...\"}")
+                        .withBody("{\"id\":\"blk:abc\",\"header\":{\"height\":100}}")
         ));
 
         long start = System.nanoTime();

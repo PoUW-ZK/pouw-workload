@@ -1,80 +1,75 @@
 # Light Node API Contract
 
-This contract defines the read-only REST endpoints assumed by the workload
-generator for a Bitcoin-like L1 light node. JSON responses use HTTP `200 OK`
-for successful reads and `404 Not Found` when the requested resource does not
-exist.
+The workload client's read paths and JSON fields follow the route constants and
+view types in `pouw-node/crates/pouw-api`. The node source currently declares
+these routes but its HTTP server is not implemented yet. Successful reads use
+HTTP `200 OK`; missing resources use the node's not-found response.
 
-## `GET /chain/head`
+## `GET /v1/blocks/head`
 
-Returns the current chain head.
+Returns the tip header as a `HeaderView`.
 
 ```json
 {
-  "height": 100,
-  "hash": "0xabc..."
+  "id": "blk:...",
+  "header": {
+    "height": 100
+  }
 }
 ```
 
-## `GET /block/{height}`
+## `GET /v1/blocks/{height_or_id}/header`
 
-Returns a block by height.
+Returns the same `HeaderView` structure for one block header.
+
+## `GET /v1/blocks/{height_or_id}`
+
+Returns a block as a `BlockView`. The complete header and transaction records
+are omitted here; `txs` and `proof_txs` contain the node's JSON transaction
+views.
 
 ```json
 {
-  "height": 100,
-  "hash": "0xabc...",
-  "previousHash": "0xdef...",
-  "timestamp": 1700000000,
-  "txs": []
+  "id": "blk:...",
+  "header": {
+    "height": 100
+  },
+  "txs": [],
+  "proof_txs": []
 }
 ```
 
-## `GET /account/{address}/balance`
+## `GET /v1/accounts/{addr}`
 
-Returns the account balance in the node's smallest unit.
-
-```json
-{
-  "balance": 5000
-}
-```
-
-## `GET /account/{address}/nonce`
-
-Returns the account nonce.
+Returns both account values in one `AccountView`.
 
 ```json
 {
+  "address": "...",
+  "balance": 5000,
   "nonce": 3
 }
 ```
 
-## `GET /tx/{txId}/status`
+The workload's `balance` and `nonce` operations independently issue this read
+and select the corresponding field.
 
-Returns the status of a transaction.
+## `GET /v1/txs/{txid}`
 
-```json
-{
-  "status": "CONFIRMED",
-  "blockHeight": 100
-}
-```
-
-## `GET /proof-task/{taskId}/status`
-
-Returns the status of a proof task associated with the node.
+Returns a `TxView`. `status` is `pending` or `included`; `height` is present
+when included. An included proof request also has the flattened proof fields,
+including the base64-encoded `proof`.
 
 ```json
 {
-  "status": "COMPLETED",
-  "proof": "0x123..."
+  "txid": "...",
+  "status": "included",
+  "height": 100,
+  "tx": {}
 }
 ```
 
-## Assumptions to confirm
-
-The workload generator is built against these structures because the official
-light-node contract is not yet available. Ilia should confirm or adjust the
-paths, field names, field types, status values, and error behavior when the
-official contract is published.
+The node does not declare a separate proof-task status route. For the workload
+scenario's `proof_task_status` operation, `proof_task_ids` therefore contains
+transaction IDs of proof requests and the client reads their `TxView` from this
+same endpoint.
