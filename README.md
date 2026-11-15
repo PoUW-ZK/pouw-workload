@@ -33,6 +33,7 @@ failed and rejected reads are counted per operation, with a latency histogram
 and an in-flight gauge. Counters accumulate across runs. `scenarios/soak.yaml`
 provides a one-hour, read-only chain-head workload; observe errors, latency,
 and both processes' memory in Grafana before considering a soak successful.
+`scenarios/smoke.yaml` provides a 90-second chain-head run for local integration checks.
 
 `Dockerfile` builds the image that pouw-deploy runs as `workload`
 (`ghcr.io/pouw-zk/pouw-workload`, published from `main` by `docker.yml`). To run the

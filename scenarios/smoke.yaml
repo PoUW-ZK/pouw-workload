@@ -1,0 +1,9 @@
+name: smoke
+duration_seconds: 90
+rate_per_second: 10
+arrival_model: constant
+max_concurrency: 32
+min_height: 0
+max_height: 100
+operation_mix:
+  chain_head: 1
