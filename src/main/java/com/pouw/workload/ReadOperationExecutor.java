@@ -32,6 +32,7 @@ public final class ReadOperationExecutor implements AutoCloseable {
     private final double totalWeight;
     private final EnumMap<ReadOperation, Counters> counters = new EnumMap<>(ReadOperation.class);
     private final EnumMap<ReadOperation, ConcurrentHistogram> latencies = new EnumMap<>(ReadOperation.class);
+    private final WorkloadMetrics metrics;
     private volatile boolean closed;
 
     public ReadOperationExecutor(LightNodeClient client, WorkloadScenario scenario) {
@@ -39,7 +40,13 @@ public final class ReadOperationExecutor implements AutoCloseable {
     }
 
     public ReadOperationExecutor(LightNodeClient client, WorkloadScenario scenario, long initialHead) {
+        this(client, scenario, initialHead, null);
+    }
+
+    public ReadOperationExecutor(LightNodeClient client, WorkloadScenario scenario, long initialHead,
+                                 WorkloadMetrics metrics) {
         this.client = client;
+        this.metrics = metrics;
         dataPool = new ReadDataPool(scenario, initialHead);
         maxConcurrency = scenario.maxConcurrency();
         permits = new Semaphore(maxConcurrency);
@@ -79,13 +86,23 @@ public final class ReadOperationExecutor implements AutoCloseable {
         Counters operationCounters = counters.get(operation);
         if (!permits.tryAcquire()) {
             operationCounters.rejected.incrementAndGet();
+            if (metrics != null) {
+                metrics.rejected(operation);
+            }
             return false;
         }
 
         try {
+            if (metrics != null) {
+                metrics.sent(operation);
+            }
             virtualThreads.execute(() -> startRequest(operation, plannedSendNanos, operationCounters));
             return true;
         } catch (RejectedExecutionException error) {
+            if (metrics != null) {
+                metrics.completed(operation, 0, true);
+                metrics.rejected(operation);
+            }
             permits.release();
             operationCounters.rejected.incrementAndGet();
             if (!closed) {
@@ -181,6 +198,9 @@ public final class ReadOperationExecutor implements AutoCloseable {
         if (error != null) {
             operationCounters.failures.incrementAndGet();
             LOGGER.warn("Light-node read operation {} failed", operation, error);
+        }
+        if (metrics != null) {
+            metrics.completed(operation, elapsedNanos, error != null);
         }
         permits.release();
     }

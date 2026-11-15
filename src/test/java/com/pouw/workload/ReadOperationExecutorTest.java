@@ -4,6 +4,8 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import io.micrometer.prometheusmetrics.PrometheusConfig;
+import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
 
 import java.time.Duration;
 import java.util.List;
@@ -78,6 +80,26 @@ class ReadOperationExecutorTest {
                 "Scheduled " + result.scheduledArrivals() + " arrivals instead of 20");
         assertEquals(result.scheduledArrivals(),
                 result.operations().get(ReadOperation.CHAIN_HEAD).completed());
+    }
+
+    @Test
+    void recordsFailuresAndRejectedArrivalsInPrometheus() throws Exception {
+        server.stubFor(get("/v1/blocks/head").willReturn(aResponse().withStatus(404).withFixedDelay(150)));
+        PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
+        try (ReadOperationExecutor executor = new ReadOperationExecutor(
+                     new LightNodeClient(server.baseUrl(), Duration.ofSeconds(2)),
+                     scenario(1), 100, new WorkloadMetrics(registry))) {
+            assertTrue(executor.submit(ReadOperation.CHAIN_HEAD, System.nanoTime()));
+            assertFalse(executor.submit(ReadOperation.CHAIN_HEAD, System.nanoTime()));
+            executor.awaitCompletion(Duration.ofSeconds(3));
+            assertEquals(1, registry.get("workload.reads.sent").tag("operation", "chain_head").counter().count());
+            assertEquals(1, registry.get("workload.reads.errors").tag("operation", "chain_head").counter().count());
+            assertEquals(1, registry.get("workload.reads.rejected").tag("operation", "chain_head").counter().count());
+            assertEquals(0, registry.get("workload.reads.inflight").gauge().value());
+            assertEquals(1, registry.get("workload.reads.latency").tag("operation", "chain_head").timer().count());
+        } finally {
+            registry.close();
+        }
     }
 
     private static WorkloadScenario scenario(int maxConcurrency) {

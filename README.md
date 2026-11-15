@@ -20,6 +20,20 @@ from Java with `WorkloadScenarioRunner`; saturation is counted as rejected
 dispatches rather than blocking the open-loop scheduler. HdrHistogram reports
 planned-send-to-response p50/p95/p99 latency in microseconds per operation.
 
+The HTTP API listens on port 8000. `GET /scenarios` lists available files;
+`POST /api/v1/start` accepts `{"scenario_name":"example"}`, `POST /api/v1/stop`
+stops arrivals and drains in-flight reads, and `GET /api/v1/status` returns
+live per-operation statistics. The unprefixed `/start`, `/stop`, `/status` and
+`/results` routes are also available; results are CSV after a completed or
+stopped run. Only one run can be active at a time. Scenario names are file
+basenames under `scenarios`, not arbitrary paths.
+
+Prometheus can scrape `http://localhost:8001/metrics`: sent, successful,
+failed and rejected reads are counted per operation, with a latency histogram
+and an in-flight gauge. Counters accumulate across runs. `scenarios/soak.yaml`
+provides a one-hour, read-only chain-head workload; observe errors, latency,
+and both processes' memory in Grafana before considering a soak successful.
+
 `Dockerfile` builds the image that pouw-deploy runs as `workload`
 (`ghcr.io/pouw-zk/pouw-workload`, published from `main` by `docker.yml`). To run the
 whole network with your local changes, clone pouw-deploy next to this repository and

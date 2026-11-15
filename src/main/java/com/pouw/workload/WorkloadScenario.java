@@ -30,8 +30,8 @@ public record WorkloadScenario(
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("name must not be blank");
         }
-        if (durationSeconds <= 0) {
-            throw new IllegalArgumentException("duration_seconds must be greater than zero");
+        if (durationSeconds <= 0 || durationSeconds > Long.MAX_VALUE / 1_000_000_000L) {
+            throw new IllegalArgumentException("duration_seconds is outside the supported range");
         }
         if (!Double.isFinite(ratePerSecond) || ratePerSecond <= 0 || ratePerSecond > 1_000_000_000) {
             throw new IllegalArgumentException("rate_per_second must be in (0, 1000000000]");

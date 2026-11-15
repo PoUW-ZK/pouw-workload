@@ -14,6 +14,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --no-create-home pouw
 COPY --from=build /src/build/install/pouw-workload-generator /opt/pouw-workload
+COPY --from=build /src/scenarios /opt/pouw-workload/scenarios
+WORKDIR /opt/pouw-workload
 USER 10001
-EXPOSE 8000
+EXPOSE 8000 8001
 ENTRYPOINT ["/opt/pouw-workload/bin/pouw-workload-generator"]
