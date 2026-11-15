@@ -17,8 +17,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
+import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,6 +39,17 @@ class WorkloadApiTest {
                 operation_mix:
                   chain_head: 1
                 """);
+        Files.writeString(scenarios.resolve("invalid-model.yaml"), """
+                name: invalid-model
+                duration_seconds: 10
+                rate_per_second: 5
+                arrival_model: random
+                max_concurrency: 10
+                min_height: 0
+                max_height: 100
+                operation_mix:
+                  chain_head: 1
+                """);
         WireMockServer node = new WireMockServer(wireMockConfig().dynamicPort());
         node.start();
         node.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get("/v1/blocks/head").willReturn(
@@ -46,15 +57,31 @@ class WorkloadApiTest {
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         ScenarioService service = new ScenarioService(scenarios,
                 new LightNodeClient(node.baseUrl(), Duration.ofSeconds(2)), new WorkloadMetrics(registry));
-        Javalin api = Main.api(service).start(0);
-        Javalin metrics = Main.metrics(registry).start(0);
+        Main.RunningServers servers = Main.startServers(0, 0, service, registry);
+        Javalin api = servers.api();
+        Javalin metrics = servers.metrics();
         try {
+            assertEquals(8000, Main.API_PORT);
+            assertEquals(8001, Main.METRICS_PORT);
+            assertNotEquals(api.port(), metrics.port());
+            assertEquals(200, get(api, "/health").statusCode());
+            assertEquals("UP", json(get(api, "/health")).path("status").asText());
+            assertEquals(200, get(api, "/scenarios").statusCode());
+            assertTrue(json(get(api, "/scenarios")).path("scenarios").toString().contains("test"));
+            assertEquals(200, get(api, "/api/v1/scenarios").statusCode());
+            assertEquals(404, get(api, "/metrics").statusCode());
+            assertEquals(404, get(metrics, "/health").statusCode());
+            assertEquals(404, get(metrics, "/api/v1/status").statusCode());
+            assertEquals(400, post(api, "/start", "{\"scenario_name\":\"invalid-model\"}").statusCode());
+            assertEquals(400, post(api, "/start", "{\"scenario_name\":\"missing\"}").statusCode());
             assertEquals(400, post(api, "/api/v1/start", "{\"scenario_name\":\"../test\"}").statusCode());
             assertEquals(400, post(api, "/start", "null").statusCode());
             assertEquals(404, get(api, "/results").statusCode());
+            assertEquals(404, get(api, "/api/v1/results").statusCode());
             assertEquals(202, post(api, "/api/v1/start", "{\"scenario_name\":\"test\"}").statusCode());
             assertEquals(409, post(api, "/start", "{\"scenario_name\":\"test\"}").statusCode());
             assertEquals("running", json(get(api, "/api/v1/status")).path("status").asText());
+            assertEquals("running", json(get(api, "/status")).path("status").asText());
             long firstReadDeadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
             while (registry.get("workload.reads.successful").tag("operation", "chain_head")
                     .counter().count() == 0 && System.nanoTime() < firstReadDeadline) {
@@ -73,7 +100,12 @@ class WorkloadApiTest {
             assertTrue(json(get(api, "/status")).path("operations").path("CHAIN_HEAD").has("p50Micros"));
             assertEquals(409, post(api, "/stop", "").statusCode());
             assertTrue(get(api, "/results").body().contains("CHAIN_HEAD,"));
-            String scrape = get(metrics, "/metrics").body();
+            assertEquals(200, get(api, "/api/v1/results").statusCode());
+            HttpResponse<String> metricsResponse = get(metrics, "/metrics");
+            assertEquals(200, metricsResponse.statusCode());
+            assertTrue(metricsResponse.headers().firstValue("Content-Type").orElse("")
+                    .startsWith("text/plain"));
+            String scrape = metricsResponse.body();
             assertTrue(scrape.contains("workload_reads_sent_total{operation=\"chain_head\"}"));
             assertTrue(scrape.contains("workload_reads_successful_total{operation=\"chain_head\"}"));
             assertTrue(scrape.contains("workload_reads_latency_seconds_bucket{"));
@@ -86,8 +118,7 @@ class WorkloadApiTest {
             assertEquals("stopped", json(get(api, "/status")).path("status").asText());
             assertEquals(200, get(api, "/results").statusCode());
         } finally {
-            api.stop();
-            metrics.stop();
+            servers.close();
             node.stop();
             registry.close();
         }

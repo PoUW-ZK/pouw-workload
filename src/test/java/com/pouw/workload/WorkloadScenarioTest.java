@@ -3,6 +3,7 @@ package com.pouw.workload;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
@@ -64,6 +65,38 @@ class WorkloadScenarioTest {
                 null,
                 java.util.Map.of("balance", 1d)
         ));
+    }
+
+    @Test
+    void rejectsNegativeDurationAndUnknownArrivalModel() throws Exception {
+        assertThrows(IllegalArgumentException.class, () -> new WorkloadScenario(
+                "negative-duration",
+                -1,
+                5,
+                ArrivalModel.Kind.CONSTANT,
+                20,
+                4,
+                1,
+                100,
+                null,
+                null,
+                null,
+                java.util.Map.of("chain_head", 1d)
+        ));
+
+        Path scenarioFile = temporaryDirectory.resolve("unknown-arrival-model.yaml");
+        Files.writeString(scenarioFile, """
+                name: unknown-arrival-model
+                duration_seconds: 10
+                rate_per_second: 5
+                arrival_model: random
+                max_concurrency: 4
+                min_height: 1
+                max_height: 100
+                operation_mix:
+                  chain_head: 1
+                """);
+        assertThrows(IOException.class, () -> WorkloadScenario.fromYaml(scenarioFile));
     }
 
     @Test

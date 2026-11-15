@@ -25,7 +25,7 @@ public final class ReadOperationExecutor implements AutoCloseable {
 
     private final LightNodeClient client;
     private final ReadDataPool dataPool;
-    private final ExecutorService virtualThreads = Executors.newVirtualThreadPerTaskExecutor();
+    private final ExecutorService virtualThreads;
     private final Semaphore permits;
     private final int maxConcurrency;
     private final EnumMap<ReadOperation, Double> operationWeights;
@@ -45,8 +45,19 @@ public final class ReadOperationExecutor implements AutoCloseable {
 
     public ReadOperationExecutor(LightNodeClient client, WorkloadScenario scenario, long initialHead,
                                  WorkloadMetrics metrics) {
+        this(client, scenario, initialHead, metrics, Executors.newVirtualThreadPerTaskExecutor());
+    }
+
+    ReadOperationExecutor(
+            LightNodeClient client,
+            WorkloadScenario scenario,
+            long initialHead,
+            WorkloadMetrics metrics,
+            ExecutorService virtualThreads
+    ) {
         this.client = client;
         this.metrics = metrics;
+        this.virtualThreads = virtualThreads;
         dataPool = new ReadDataPool(scenario, initialHead);
         maxConcurrency = scenario.maxConcurrency();
         permits = new Semaphore(maxConcurrency);
@@ -93,19 +104,18 @@ public final class ReadOperationExecutor implements AutoCloseable {
         }
 
         try {
-            if (metrics != null) {
-                metrics.sent(operation);
-            }
             virtualThreads.execute(() -> startRequest(operation, plannedSendNanos, operationCounters));
             return true;
-        } catch (RejectedExecutionException error) {
-            if (metrics != null) {
-                metrics.completed(operation, 0, true);
-                metrics.rejected(operation);
-            }
+        } catch (RuntimeException | Error error) {
             permits.release();
             operationCounters.rejected.incrementAndGet();
+            if (metrics != null) {
+                metrics.rejected(operation);
+            }
             if (!closed) {
+                throw error;
+            }
+            if (!(error instanceof RejectedExecutionException)) {
                 throw error;
             }
             return false;
@@ -171,10 +181,16 @@ public final class ReadOperationExecutor implements AutoCloseable {
     private void startRequest(ReadOperation operation, long plannedSendNanos, Counters operationCounters) {
         CompletableFuture<?> response;
         try {
+            if (metrics != null) {
+                metrics.sent(operation);
+            }
             response = invoke(operation);
         } catch (RuntimeException error) {
             complete(operation, plannedSendNanos, operationCounters, error);
             return;
+        } catch (Error error) {
+            complete(operation, plannedSendNanos, operationCounters, error);
+            throw error;
         }
         response.whenComplete((ignored, error) ->
                 complete(operation, plannedSendNanos, operationCounters, error));

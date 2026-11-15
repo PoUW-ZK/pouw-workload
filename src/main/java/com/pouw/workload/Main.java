@@ -16,6 +16,8 @@ import java.time.Duration;
 import java.util.Map;
 
 public final class Main {
+    static final int API_PORT = 8000;
+    static final int METRICS_PORT = 8001;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Logger LOGGER = LoggerFactory.getLogger(Main.class);
 
@@ -27,8 +29,23 @@ public final class Main {
         LightNodeClient client = new LightNodeClient(config.lightNodeUrl(), Duration.ofMillis(config.timeoutMs()));
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         ScenarioService service = new ScenarioService(Path.of("scenarios"), client, new WorkloadMetrics(registry));
-        api(service).start(8000);
-        metrics(registry).start(8001);
+        startServers(API_PORT, METRICS_PORT, service, registry);
+    }
+
+    static RunningServers startServers(
+            int apiPort,
+            int metricsPort,
+            ScenarioService service,
+            PrometheusMeterRegistry registry
+    ) {
+        Javalin api = api(service).start(apiPort);
+        try {
+            Javalin metrics = metrics(registry).start(metricsPort);
+            return new RunningServers(api, metrics);
+        } catch (RuntimeException | Error error) {
+            api.stop();
+            throw error;
+        }
     }
 
     static Javalin api(ScenarioService service) {
@@ -106,5 +123,16 @@ public final class Main {
     }
 
     private record StartRequest(@JsonProperty("scenario_name") String scenarioName) {
+    }
+
+    record RunningServers(Javalin api, Javalin metrics) implements AutoCloseable {
+        @Override
+        public void close() {
+            try {
+                metrics.stop();
+            } finally {
+                api.stop();
+            }
+        }
     }
 }
