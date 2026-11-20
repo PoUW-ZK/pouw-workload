@@ -6,6 +6,8 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -124,5 +126,61 @@ class WorkloadScenarioTest {
         for (int attempt = 0; attempt < 100; attempt++) {
             assertTrue(pool.nextHeight() <= 20);
         }
+    }
+
+    @Test
+    void validatesTransferOnlyAndMixedScenarios() {
+        WorkloadScenario transferOnly = new WorkloadScenario(
+                "transfers",
+                30,
+                0,
+                ArrivalModel.Kind.POISSON,
+                20,
+                32,
+                0,
+                100,
+                List.of(),
+                List.of(),
+                List.of(),
+                Map.of(),
+                10,
+                8,
+                100,
+                2,
+                1_000_000
+        );
+
+        assertEquals(10, transferOnly.transferRatePerSecond());
+        assertEquals(8, transferOnly.walletCount());
+        assertThrows(IllegalArgumentException.class, () -> new WorkloadScenario(
+                "unfunded",
+                30,
+                0,
+                ArrivalModel.Kind.CONSTANT,
+                20,
+                4,
+                0,
+                100,
+                List.of(),
+                List.of(),
+                List.of(),
+                Map.of(),
+                1,
+                1,
+                100,
+                2,
+                101
+        ));
+    }
+
+    @Test
+    void loadsTheShippedTransferScenario() throws Exception {
+        WorkloadScenario scenario =
+                WorkloadScenario.fromYaml(Path.of("scenarios", "transfers.yaml"));
+
+        assertEquals("transfers", scenario.name());
+        assertEquals(20, scenario.transferRatePerSecond());
+        assertEquals(8, scenario.walletCount());
+        assertTrue(scenario.parsedOperationMix().containsKey(ReadOperation.CHAIN_HEAD));
     }
 }

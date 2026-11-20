@@ -22,9 +22,33 @@ public record WorkloadScenario(
         List<String> addresses,
         @JsonProperty("transaction_ids") List<String> transactionIds,
         @JsonProperty("proof_task_ids") List<String> proofTaskIds,
-        @JsonProperty("operation_mix") Map<String, Double> operationMix
+        @JsonProperty("operation_mix") Map<String, Double> operationMix,
+        @JsonProperty("transfer_rate_per_second") double transferRatePerSecond,
+        @JsonProperty("wallet_count") int walletCount,
+        @JsonProperty("transfer_amount") long transferAmount,
+        @JsonProperty("transfer_fee") long transferFee,
+        @JsonProperty("wallet_funding_amount") long walletFundingAmount
 ) {
     private static final ObjectMapper YAML_MAPPER = new ObjectMapper(new YAMLFactory());
+
+    public WorkloadScenario(
+            String name,
+            long durationSeconds,
+            double ratePerSecond,
+            ArrivalModel.Kind arrivalModel,
+            long burstPeriodSeconds,
+            int maxConcurrency,
+            long minHeight,
+            long maxHeight,
+            List<String> addresses,
+            List<String> transactionIds,
+            List<String> proofTaskIds,
+            Map<String, Double> operationMix
+    ) {
+        this(name, durationSeconds, ratePerSecond, arrivalModel, burstPeriodSeconds,
+                maxConcurrency, minHeight, maxHeight, addresses, transactionIds, proofTaskIds,
+                operationMix, 0, 0, 0, 0, 0);
+    }
 
     public WorkloadScenario {
         if (name == null || name.isBlank()) {
@@ -33,8 +57,10 @@ public record WorkloadScenario(
         if (durationSeconds <= 0 || durationSeconds > Long.MAX_VALUE / 1_000_000_000L) {
             throw new IllegalArgumentException("duration_seconds is outside the supported range");
         }
-        if (!Double.isFinite(ratePerSecond) || ratePerSecond <= 0 || ratePerSecond > 1_000_000_000) {
-            throw new IllegalArgumentException("rate_per_second must be in (0, 1000000000]");
+        if (!isValidRate(ratePerSecond) || !isValidRate(transferRatePerSecond)
+                || (ratePerSecond == 0 && transferRatePerSecond == 0)) {
+            throw new IllegalArgumentException(
+                    "read and transfer rates must be in [0, 1000000000] and one must be positive");
         }
         if (arrivalModel == null) {
             throw new IllegalArgumentException("arrival_model must not be null");
@@ -53,7 +79,8 @@ public record WorkloadScenario(
         addresses = immutableList(addresses, "addresses");
         transactionIds = immutableList(transactionIds, "transaction_ids");
         proofTaskIds = immutableList(proofTaskIds, "proof_task_ids");
-        if (operationMix == null || operationMix.isEmpty()) {
+        operationMix = operationMix == null ? Map.of() : operationMix;
+        if (ratePerSecond > 0 && operationMix.isEmpty()) {
             throw new IllegalArgumentException("operation_mix must contain at least one operation");
         }
 
@@ -71,7 +98,7 @@ public record WorkloadScenario(
             weights.put(operation, weight);
             totalWeight += weight;
         }
-        if (!Double.isFinite(totalWeight) || totalWeight <= 0) {
+        if (ratePerSecond > 0 && (!Double.isFinite(totalWeight) || totalWeight <= 0)) {
             throw new IllegalArgumentException("operation_mix must have a positive total weight");
         }
 
@@ -84,6 +111,22 @@ public record WorkloadScenario(
         }
         if (weight(weights, ReadOperation.PROOF_TASK_STATUS) > 0 && proofTaskIds.isEmpty()) {
             throw new IllegalArgumentException("proof_task_ids are required for proof_task_status");
+        }
+        if (transferRatePerSecond > 0) {
+            if (walletCount <= 0) {
+                throw new IllegalArgumentException("wallet_count must be greater than zero for transfers");
+            }
+            if (transferAmount <= 0) {
+                throw new IllegalArgumentException("transfer_amount must be greater than zero");
+            }
+            if (transferFee < 0) {
+                throw new IllegalArgumentException("transfer_fee must be non-negative");
+            }
+            if (transferAmount > Long.MAX_VALUE - transferFee
+                    || walletFundingAmount < transferAmount + transferFee) {
+                throw new IllegalArgumentException(
+                        "wallet_funding_amount must cover the transfer amount and fee");
+            }
         }
         operationMix = Map.copyOf(operationMix);
     }
@@ -102,6 +145,10 @@ public record WorkloadScenario(
 
     private static double weight(Map<ReadOperation, Double> weights, ReadOperation operation) {
         return weights.getOrDefault(operation, 0d);
+    }
+
+    private static boolean isValidRate(double rate) {
+        return Double.isFinite(rate) && rate >= 0 && rate <= 1_000_000_000;
     }
 
     private static List<String> immutableList(List<String> values, String name) {

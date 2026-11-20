@@ -5,16 +5,15 @@ view types in `pouw-node/crates/pouw-api`. The node source currently declares
 these routes but its HTTP server is not implemented yet. Successful reads use
 HTTP `200 OK`; missing resources use the node's not-found response.
 
-## `GET /v1/blocks/head`
+## `GET /v1/light/head`
 
-Returns the tip header as a `HeaderView`.
+Returns the current chain head.
 
 ```json
 {
+  "chain_id": 4242,
   "id": "blk:...",
-  "header": {
-    "height": 100
-  }
+  "height": 100
 }
 ```
 
@@ -69,7 +68,18 @@ including the base64-encoded `proof`.
 }
 ```
 
-The node does not declare a separate proof-task status route. For the workload
-scenario's `proof_task_status` operation, `proof_task_ids` therefore contains
-transaction IDs of proof requests and the client reads their `TxView` from this
-same endpoint.
+## `GET /v1/light/proof-jobs/{txid}`
+
+Returns the proof-request job status (`pending`, `included`, or `failed`).
+The workload uses this route for its `proof_task_status` operation. An included
+job contains `proof_hash`, `height`, and `block`.
+
+```json
+{
+  "txid": "tx:...",
+  "status": "included",
+  "proof_hash": "proof:...",
+  "height": 100,
+  "block": "blk:..."
+}
+```

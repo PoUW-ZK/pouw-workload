@@ -3,6 +3,7 @@ package com.pouw.workload;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
@@ -13,17 +14,32 @@ public final class ScenarioService {
     private static final Logger LOGGER = LoggerFactory.getLogger(ScenarioService.class);
     private final Path scenariosDirectory;
     private final LightNodeClient client;
+    private final FullNodeClient fullNodeClient;
+    private final Duration requestTimeout;
     private final WorkloadMetrics metrics;
     private String status = "stopped";
     private String error;
     private String scenarioName;
     private WorkloadScenarioRunner runner;
     private ReadOperationExecutor executor;
+    private TransferOperationExecutor transferExecutor;
     private WorkloadScenarioRunner.RunResult result;
 
     public ScenarioService(Path scenariosDirectory, LightNodeClient client, WorkloadMetrics metrics) {
+        this(scenariosDirectory, client, null, Duration.ofSeconds(5), metrics);
+    }
+
+    public ScenarioService(
+            Path scenariosDirectory,
+            LightNodeClient client,
+            FullNodeClient fullNodeClient,
+            Duration requestTimeout,
+            WorkloadMetrics metrics
+    ) {
         this.scenariosDirectory = scenariosDirectory;
         this.client = client;
+        this.fullNodeClient = fullNodeClient;
+        this.requestTimeout = requestTimeout;
         this.metrics = metrics;
     }
 
@@ -53,12 +69,23 @@ public final class ScenarioService {
         error = null;
         result = null;
         executor = null;
+        transferExecutor = null;
         status = "running";
-        runner = new WorkloadScenarioRunner(client, metrics, current -> {
-            synchronized (this) {
-                executor = current;
-            }
-        });
+        runner = new WorkloadScenarioRunner(
+                client,
+                fullNodeClient,
+                requestTimeout,
+                metrics,
+                current -> {
+                    synchronized (this) {
+                        executor = current;
+                    }
+                },
+                current -> {
+                    synchronized (this) {
+                        transferExecutor = current;
+                    }
+                });
         WorkloadScenarioRunner current = runner;
         Thread.ofVirtual().name("workload-scenario").start(() -> run(current, scenario));
     }
@@ -94,7 +121,10 @@ public final class ScenarioService {
     public synchronized Status status() {
         Map<ReadOperation, ReadOperationExecutor.OperationMetrics> operations =
                 executor == null ? Map.of() : executor.snapshot();
-        return new Status(status, scenarioName, error, operations);
+        TransferOperationExecutor.TransferMetrics transfers = transferExecutor == null
+                ? TransferOperationExecutor.TransferMetrics.empty()
+                : transferExecutor.snapshot();
+        return new Status(status, scenarioName, error, operations, transfers);
     }
 
     public synchronized WorkloadScenarioRunner.RunResult result() {
@@ -102,6 +132,7 @@ public final class ScenarioService {
     }
 
     public record Status(String status, String scenario, String error,
-                         Map<ReadOperation, ReadOperationExecutor.OperationMetrics> operations) {
+                         Map<ReadOperation, ReadOperationExecutor.OperationMetrics> operations,
+                         TransferOperationExecutor.TransferMetrics transfers) {
     }
 }

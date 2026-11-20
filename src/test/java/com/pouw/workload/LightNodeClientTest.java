@@ -37,8 +37,8 @@ class LightNodeClientTest {
 
     @Test
     void readsAllSupportedEndpoints() throws Exception {
-        server.stubFor(get("/v1/blocks/head").willReturn(okJson("""
-                {"id":"blk:abc","header":{"height":100}}
+        server.stubFor(get("/v1/light/head").willReturn(okJson("""
+                {"chain_id":4242,"id":"blk:abc","height":100}
                 """)));
         server.stubFor(get("/v1/blocks/100/header").willReturn(okJson("""
                 {"id":"blk:abc","header":{"height":100}}
@@ -52,19 +52,21 @@ class LightNodeClientTest {
         server.stubFor(get("/v1/txs/tx-1").willReturn(okJson("""
                 {"status":"included","height":100}
                 """)));
-        server.stubFor(get("/v1/txs/task-1").willReturn(okJson("""
-                {"status":"included","height":100,"proof":"MTIz"}
+        server.stubFor(get("/v1/light/proof-jobs/task-1").willReturn(okJson("""
+                {"txid":"task-1","status":"included","height":100,
+                 "proof_hash":"proof:123","block":"blk:abc"}
                 """)));
 
         assertEquals(100, client.getChainHead().get(2, TimeUnit.SECONDS).height());
+        assertEquals(4242, client.getChainHead().get(2, TimeUnit.SECONDS).chainId());
         assertEquals(100, client.getBlockHeader(100).get(2, TimeUnit.SECONDS).height());
         assertEquals(0, client.getBlock(100).get(2, TimeUnit.SECONDS).txs().size());
         assertEquals(5000, client.getBalance("alice").get(2, TimeUnit.SECONDS).balance());
         assertEquals(3, client.getNonce("alice").get(2, TimeUnit.SECONDS).nonce());
         assertEquals("included",
                 client.getTransactionStatus("tx-1").get(2, TimeUnit.SECONDS).status());
-        assertEquals("MTIz",
-                client.getProofTaskStatus("task-1").get(2, TimeUnit.SECONDS).proof());
+        assertEquals("proof:123",
+                client.getProofTaskStatus("task-1").get(2, TimeUnit.SECONDS).proofHash());
     }
 
     @Test
@@ -84,11 +86,11 @@ class LightNodeClientTest {
 
     @Test
     void sendAsyncDoesNotBlockCallerDuringDelayedResponse() throws Exception {
-        server.stubFor(get("/v1/blocks/head").willReturn(
+        server.stubFor(get("/v1/light/head").willReturn(
                 aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withFixedDelay(300)
-                        .withBody("{\"id\":\"blk:abc\",\"header\":{\"height\":100}}")
+                        .withBody("{\"chain_id\":4242,\"id\":\"blk:abc\",\"height\":100}")
         ));
 
         long start = System.nanoTime();

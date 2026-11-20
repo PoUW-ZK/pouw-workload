@@ -26,8 +26,8 @@ class WorkloadPerformanceTest {
         WireMockServer server = new WireMockServer(wireMockConfig().dynamicPort());
         server.start();
         try {
-            server.stubFor(get("/v1/blocks/head").willReturn(okJson("""
-                    {"id":"blk:abc","header":{"height":100}}
+            server.stubFor(get("/v1/light/head").willReturn(okJson("""
+                    {"chain_id":4242,"id":"blk:abc","height":100}
                     """)));
             LightNodeClient client = new LightNodeClient(server.baseUrl(), Duration.ofSeconds(2));
             for (int request = 0; request < 20; request++) {

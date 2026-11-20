@@ -38,11 +38,11 @@ class ReadOperationExecutorTest {
 
     @Test
     void capsConcurrencyWithoutBlockingAndRecordsPlannedToResponseLatency() throws Exception {
-        server.stubFor(get("/v1/blocks/head").willReturn(
+        server.stubFor(get("/v1/light/head").willReturn(
                 aResponse()
                         .withHeader("Content-Type", "application/json")
                         .withFixedDelay(150)
-                        .withBody("{\"id\":\"blk:abc\",\"header\":{\"height\":100}}")
+                        .withBody("{\"chain_id\":4242,\"id\":\"blk:abc\",\"height\":100}")
         ));
         WorkloadScenario scenario = scenario(1);
 
@@ -69,8 +69,8 @@ class ReadOperationExecutorTest {
 
     @Test
     void runsYamlConfiguredScenarioAtTheRequestedFrequencyAgainstWireMock() throws Exception {
-        server.stubFor(get("/v1/blocks/head").willReturn(okJson("""
-                {"id":"blk:abc","header":{"height":100}}
+        server.stubFor(get("/v1/light/head").willReturn(okJson("""
+                {"chain_id":4242,"id":"blk:abc","height":100}
                 """)));
         WorkloadScenario scenario = scenario(10);
 
@@ -86,7 +86,7 @@ class ReadOperationExecutorTest {
 
     @Test
     void recordsFailuresAndRejectedArrivalsInPrometheus() throws Exception {
-        server.stubFor(get("/v1/blocks/head").willReturn(aResponse().withStatus(404).withFixedDelay(150)));
+        server.stubFor(get("/v1/light/head").willReturn(aResponse().withStatus(404).withFixedDelay(150)));
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         try (ReadOperationExecutor executor = new ReadOperationExecutor(
                      new LightNodeClient(server.baseUrl(), Duration.ofSeconds(2)),

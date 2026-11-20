@@ -26,9 +26,12 @@ public final class Main {
 
     public static void main(String[] args) {
         Config config = Config.fromEnvironment();
-        LightNodeClient client = new LightNodeClient(config.lightNodeUrl(), Duration.ofMillis(config.timeoutMs()));
+        Duration requestTimeout = Duration.ofMillis(config.timeoutMs());
+        LightNodeClient client = new LightNodeClient(config.lightNodeUrl(), requestTimeout);
+        FullNodeClient fullNodeClient = new FullNodeClient(config.fullNodeUrls(), requestTimeout);
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
-        ScenarioService service = new ScenarioService(Path.of("scenarios"), client, new WorkloadMetrics(registry));
+        ScenarioService service = new ScenarioService(
+                Path.of("scenarios"), client, fullNodeClient, requestTimeout, new WorkloadMetrics(registry));
         startServers(API_PORT, METRICS_PORT, service, registry);
     }
 
@@ -119,6 +122,12 @@ public final class Main {
                 .append(values.completed()).append(',').append(values.failures()).append(',')
                 .append(values.rejected()).append(',').append(values.p50Micros()).append(',')
                 .append(values.p95Micros()).append(',').append(values.p99Micros()).append('\n'));
+        TransferOperationExecutor.TransferMetrics transfers = result.transfers();
+        csv.append("TRANSFER,").append(transfers.completed()).append(',')
+                .append(transfers.failures()).append(',')
+                .append(transfers.rejected().values().stream().mapToLong(Long::longValue).sum())
+                .append(',').append(transfers.p50Micros()).append(',')
+                .append(transfers.p95Micros()).append(',').append(transfers.p99Micros()).append('\n');
         ctx.contentType("text/csv").result(csv.toString());
     }
 

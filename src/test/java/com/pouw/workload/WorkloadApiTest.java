@@ -52,8 +52,8 @@ class WorkloadApiTest {
                 """);
         WireMockServer node = new WireMockServer(wireMockConfig().dynamicPort());
         node.start();
-        node.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get("/v1/blocks/head").willReturn(
-                okJson("{\"id\":\"blk:abc\",\"header\":{\"height\":100}}")));
+        node.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get("/v1/light/head").willReturn(
+                okJson("{\"chain_id\":4242,\"id\":\"blk:abc\",\"height\":100}")));
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         ScenarioService service = new ScenarioService(scenarios,
                 new LightNodeClient(node.baseUrl(), Duration.ofSeconds(2)), new WorkloadMetrics(registry));
@@ -139,9 +139,9 @@ class WorkloadApiTest {
                 """);
         WireMockServer node = new WireMockServer(wireMockConfig().dynamicPort());
         node.start();
-        node.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get("/v1/blocks/head").willReturn(
+        node.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get("/v1/light/head").willReturn(
                 aResponse().withFixedDelay(5000).withHeader("Content-Type", "application/json")
-                        .withBody("{\"id\":\"blk:abc\",\"header\":{\"height\":100}}")));
+                        .withBody("{\"chain_id\":4242,\"id\":\"blk:abc\",\"height\":100}")));
         PrometheusMeterRegistry registry = new PrometheusMeterRegistry(PrometheusConfig.DEFAULT);
         ScenarioService service = new ScenarioService(scenarios,
                 new LightNodeClient(node.baseUrl(), Duration.ofSeconds(10)), new WorkloadMetrics(registry));

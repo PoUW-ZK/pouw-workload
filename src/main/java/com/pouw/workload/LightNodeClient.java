@@ -52,11 +52,11 @@ public final class LightNodeClient {
     }
 
     public CompletableFuture<ChainHead> getChainHead() {
-        return get("/v1/blocks/head", ChainHead.class);
+        return get("/v1/light/head", ChainHead.class);
     }
 
-    public CompletableFuture<ChainHead> getBlockHeader(long height) {
-        return get("/v1/blocks/" + height + "/header", ChainHead.class);
+    public CompletableFuture<BlockHeaderView> getBlockHeader(long height) {
+        return get("/v1/blocks/" + height + "/header", BlockHeaderView.class);
     }
 
     public CompletableFuture<Block> getBlock(long height) {
@@ -76,10 +76,13 @@ public final class LightNodeClient {
     }
 
     public CompletableFuture<ProofTaskStatus> getProofTaskStatus(String transactionId) {
-        return get("/v1/txs/" + encodePathSegment(transactionId), ProofTaskStatus.class);
+        return get(
+                "/v1/light/proof-jobs/" + encodePathSegment(transactionId),
+                ProofTaskStatus.class
+        );
     }
 
-    private CompletableFuture<AccountView> getAccount(String address) {
+    public CompletableFuture<AccountView> getAccount(String address) {
         return get("/v1/accounts/" + encodePathSegment(address), AccountView.class);
     }
 
@@ -107,7 +110,8 @@ public final class LightNodeClient {
                     }
                     return failedFuture(new NodeApiException(
                             response.statusCode(),
-                            response.body()
+                            response.body(),
+                            errorCode(response.body())
                     ));
                 })
                 .exceptionallyCompose(error -> {
@@ -136,6 +140,14 @@ public final class LightNodeClient {
                 || error instanceof java.util.concurrent.TimeoutException;
     }
 
+    private String errorCode(String responseBody) {
+        try {
+            return objectMapper.readTree(responseBody).path("error").path("code").asText(null);
+        } catch (IOException error) {
+            return null;
+        }
+    }
+
     private static Throwable unwrap(Throwable error) {
         if (error instanceof CompletionException && error.getCause() != null) {
             return error.getCause();
@@ -162,13 +174,16 @@ public final class LightNodeClient {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    public record ChainHead(String id, BlockHeader header) {
-        public long height() {
-            return header.height();
-        }
-
+    public record ChainHead(String id, @JsonProperty("chain_id") long chainId, long height) {
         public String hash() {
             return id;
+        }
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BlockHeaderView(String id, BlockHeader header) {
+        public long height() {
+            return header.height();
         }
     }
 
@@ -207,22 +222,35 @@ public final class LightNodeClient {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record ProofTaskStatus(
+            String txid,
             String status,
             @JsonProperty("height") Long blockHeight,
-            String proof
+            @JsonProperty("proof_hash") String proofHash,
+            String block,
+            String reason
     ) {
     }
 
     public static final class NodeApiException extends RuntimeException {
         private final int statusCode;
+        private final String errorCode;
 
         public NodeApiException(int statusCode, String responseBody) {
+            this(statusCode, responseBody, null);
+        }
+
+        NodeApiException(int statusCode, String responseBody, String errorCode) {
             super("Light node API returned HTTP " + statusCode + ": " + responseBody);
             this.statusCode = statusCode;
+            this.errorCode = errorCode;
         }
 
         public int statusCode() {
             return statusCode;
+        }
+
+        public String errorCode() {
+            return errorCode;
         }
     }
 }
