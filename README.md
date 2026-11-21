@@ -27,8 +27,10 @@ generator creates Ed25519 wallets, funds them from the devnet genesis key, and
 waits for each funding transaction to enter a block. Load transactions are
 signed as Borsh `Transfer` bodies and submitted round-robin to `FULL_NODE_URLS`.
 Each wallet's nonce is read from the light node and refreshed after a
-`bad_nonce` rejection. `scenarios/transfers.yaml` combines transfer load with
-the standard read mix.
+`bad_nonce` rejection without moving it backwards while other transactions may
+still be pending. The 32 bytes of `0x01` funding seed and corresponding address
+are specific to the devnet genesis. `scenarios/transfers.yaml` combines
+transfer load with the standard read mix.
 
 The HTTP API listens on port 8000. `GET /scenarios` lists available files;
 `POST /api/v1/start` accepts `{"scenario_name":"example"}`, `POST /api/v1/stop`
@@ -45,7 +47,10 @@ provides a one-hour, read-only chain-head workload; observe errors, latency,
 and both processes' memory in Grafana before considering a soak successful.
 `scenarios/smoke.yaml` provides a 90-second chain-head run for local integration checks.
 Transaction metrics expose submitted, accepted, included, rejected-by-reason,
-failed, in-flight, and acceptance-to-inclusion latency.
+failed, in-flight, and send-to-inclusion latency. `submitted` counts HTTP
+submission attempts, including retries and transfers
+whose response is ambiguous, while inclusion latency runs from the first send
+attempt to block inclusion.
 
 `Dockerfile` builds the image that pouw-deploy runs as `workload`
 (`ghcr.io/pouw-zk/pouw-workload`, published from `main` by `docker.yml`). To run the

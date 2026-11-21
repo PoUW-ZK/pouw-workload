@@ -144,6 +144,138 @@ class TransferOperationExecutorTest {
         assertEquals(0, result.transfers().failures());
     }
 
+    @Test
+    void badNonceRecoveryDoesNotMoveTheLocalNonceBackwards() throws Exception {
+        server.stubFor(get(urlPathMatching("/v1/accounts/.*"))
+                .willReturn(okJson("{\"balance\":1000000,\"nonce\":0}")));
+        server.stubFor(get(urlPathMatching("/v1/txs/.*"))
+                .willReturn(okJson("{\"status\":\"included\",\"height\":20}")));
+        server.stubFor(post("/v1/txs")
+                .inScenario("nonce-stays-ahead")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willSetStateTo("first-load")
+                .willReturn(accepted()));
+        server.stubFor(post("/v1/txs")
+                .inScenario("nonce-stays-ahead")
+                .whenScenarioStateIs("first-load")
+                .willSetStateTo("second-load")
+                .willReturn(accepted()));
+        server.stubFor(post("/v1/txs")
+                .inScenario("nonce-stays-ahead")
+                .whenScenarioStateIs("second-load")
+                .willSetStateTo("retry")
+                .willReturn(aResponse().withStatus(422)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"error\":{\"code\":\"bad_nonce\",\"message\":\"expected 1, got 0\"}}")));
+        server.stubFor(post("/v1/txs")
+                .inScenario("nonce-stays-ahead")
+                .whenScenarioStateIs("retry")
+                .willReturn(accepted()));
+
+        try (TransferOperationExecutor executor = executor(Duration.ofSeconds(2))) {
+            executor.initialize(4242);
+            assertTrue(executor.submitNext(System.nanoTime()));
+            executor.awaitCompletion(Duration.ofSeconds(2));
+            assertTrue(executor.submitNext(System.nanoTime()));
+            executor.awaitCompletion(Duration.ofSeconds(2));
+
+            List<byte[]> bodies = server.getAllServeEvents().stream()
+                    .map(event -> event.getRequest())
+                    .filter(request -> "POST".equals(request.getMethod().getName())
+                            && "/v1/txs".equals(request.getUrl()))
+                    .map(request -> request.getBody())
+                    .toList();
+            assertEquals(4, bodies.size());
+            assertEquals(
+                    List.of(0L, 0L, 1L, 1L),
+                    bodies.stream().map(TransferOperationExecutorTest::nonce).sorted().toList()
+            );
+        }
+    }
+
+    @Test
+    void anAmbiguousPostResponseIsConfirmedAndDoesNotAdvanceToASecondNonce() throws Exception {
+        server.stubFor(get(urlPathMatching("/v1/accounts/.*"))
+                .willReturn(okJson("{\"balance\":1000000,\"nonce\":0}")));
+        server.stubFor(get(urlPathMatching("/v1/txs/.*"))
+                .willReturn(okJson("{\"status\":\"included\",\"height\":20}")));
+        server.stubFor(post("/v1/txs")
+                .inScenario("ambiguous-submit")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willSetStateTo("load")
+                .willReturn(accepted()));
+        server.stubFor(post("/v1/txs")
+                .inScenario("ambiguous-submit")
+                .whenScenarioStateIs("load")
+                .willReturn(aResponse().withFixedDelay(1500).withStatus(202)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"txid\":\"" + TXID + "\"}")));
+
+        try (TransferOperationExecutor executor = executor(Duration.ofMillis(500))) {
+            executor.initialize(4242);
+            assertTrue(executor.submitNext(System.nanoTime()));
+            executor.awaitCompletion(Duration.ofSeconds(5));
+
+            TransferOperationExecutor.TransferMetrics metrics = executor.snapshot();
+            assertEquals(1, metrics.accepted());
+            assertEquals(1, metrics.included());
+            assertEquals(0, metrics.failures());
+            assertTrue(metrics.rejected().isEmpty());
+        }
+    }
+
+    @Test
+    void unresolvedAmbiguousSubmitCountsAsTransportRejection() throws Exception {
+        server.stubFor(get(urlPathMatching("/v1/accounts/.*"))
+                .willReturn(okJson("{\"balance\":1000000,\"nonce\":0}")));
+        server.stubFor(get(urlPathMatching("/v1/txs/.*"))
+                .inScenario("unknown-submit")
+                .whenScenarioStateIs("funded")
+                .willSetStateTo("load-ready")
+                .willReturn(okJson("{\"status\":\"included\",\"height\":20}")));
+        server.stubFor(post("/v1/txs")
+                .inScenario("unknown-submit")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willSetStateTo("funded")
+                .willReturn(accepted()));
+        server.stubFor(post("/v1/txs")
+                .inScenario("unknown-submit")
+                .whenScenarioStateIs("load-ready")
+                .willSetStateTo("confirm")
+                .willReturn(aResponse().withFixedDelay(1500).withStatus(202)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"txid\":\"" + TXID + "\"}")));
+        server.stubFor(get(urlPathMatching("/v1/txs/.*"))
+                .inScenario("unknown-submit")
+                .whenScenarioStateIs("confirm")
+                .willReturn(aResponse().withStatus(404)));
+        server.stubFor(post("/v1/txs")
+                .inScenario("unknown-submit")
+                .whenScenarioStateIs("confirm")
+                .willReturn(aResponse().withFixedDelay(1500).withStatus(202)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"txid\":\"" + TXID + "\"}")));
+
+        try (TransferOperationExecutor executor = executor(Duration.ofMillis(500))) {
+            executor.initialize(4242);
+            assertTrue(executor.submitNext(System.nanoTime()));
+            executor.awaitCompletion(Duration.ofSeconds(5));
+
+            TransferOperationExecutor.TransferMetrics metrics = executor.snapshot();
+            assertEquals(0, metrics.accepted());
+            assertEquals(0, metrics.included());
+            assertEquals(1, metrics.failures());
+            assertEquals(1, metrics.rejected().get("transport"));
+        }
+    }
+
+    @Test
+    void completionTimeoutCoversTheInclusionWindowAndFinalPoll() throws Exception {
+        try (TransferOperationExecutor executor = executor(Duration.ofSeconds(2))) {
+            assertTrue(executor.completionTimeout().compareTo(Duration.ofSeconds(2)) > 0);
+        }
+    }
+
     private static com.github.tomakehurst.wiremock.client.ResponseDefinitionBuilder accepted() {
         return aResponse().withStatus(202)
                 .withHeader("Content-Type", "application/json")
@@ -170,5 +302,28 @@ class TransferOperationExecutorTest {
                 2,
                 1000
         );
+    }
+
+    private TransferOperationExecutor executor(Duration requestTimeout) {
+        return new TransferOperationExecutor(
+                new FullNodeClient(List.of(server.baseUrl()), requestTimeout),
+                new LightNodeClient(server.baseUrl(), requestTimeout),
+                transferScenario(),
+                null,
+                requestTimeout,
+                Duration.ofSeconds(2),
+                Duration.ofMillis(5),
+                java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()
+        );
+    }
+
+    private static long nonce(byte[] body) {
+        byte[] nonceBytes = new byte[8];
+        System.arraycopy(body, 36, nonceBytes, 0, nonceBytes.length);
+        long littleEndian = 0;
+        for (int index = 0; index < nonceBytes.length; index++) {
+            littleEndian |= (nonceBytes[index] & 0xffL) << (8 * index);
+        }
+        return littleEndian;
     }
 }

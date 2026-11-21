@@ -141,7 +141,7 @@ public final class WorkloadScenarioRunner {
                 TransferOperationExecutor.TransferMetrics transferMetrics =
                         TransferOperationExecutor.TransferMetrics.empty();
                 if (transferExecutor != null) {
-                    transferExecutor.awaitCompletion(Duration.ofSeconds(10));
+                    transferExecutor.awaitCompletion(transferExecutor.completionTimeout());
                     transferMetrics = transferExecutor.snapshot();
                 }
                 return new RunResult(

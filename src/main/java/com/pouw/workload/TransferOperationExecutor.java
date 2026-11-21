@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReentrantLock;
 
 final class TransferOperationExecutor implements AutoCloseable {
     static final String GENESIS_ADDRESS =
@@ -28,7 +29,8 @@ final class TransferOperationExecutor implements AutoCloseable {
     private static final Logger LOGGER = LoggerFactory.getLogger(TransferOperationExecutor.class);
     private static final long MAX_TRACKED_LATENCY_MICROS = TimeUnit.DAYS.toMicros(30);
     private static final Duration DEFAULT_INCLUSION_TIMEOUT = Duration.ofSeconds(60);
-    private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofMillis(250);
+    private static final Duration DEFAULT_POLL_INTERVAL = Duration.ofMillis(1_000);
+    private static final Duration MAX_POLL_INTERVAL = Duration.ofSeconds(5);
     private static final int HISTOGRAM_SIGNIFICANT_DIGITS = 3;
 
     private final FullNodeClient fullNodeClient;
@@ -163,6 +165,9 @@ final class TransferOperationExecutor implements AutoCloseable {
     }
 
     void awaitCompletion(Duration timeout) throws InterruptedException, TimeoutException {
+        if (timeout == null || timeout.isNegative() || timeout.isZero()) {
+            throw new IllegalArgumentException("timeout must be positive");
+        }
         long deadline = System.nanoTime() + timeout.toNanos();
         long remaining = deadline - System.nanoTime();
         if (remaining <= 0 || !permits.tryAcquire(
@@ -178,6 +183,10 @@ final class TransferOperationExecutor implements AutoCloseable {
         }
     }
 
+    Duration completionTimeout() {
+        return inclusionTimeout.plus(requestTimeout).plus(MAX_POLL_INTERVAL);
+    }
+
     void stop() {
         stopped = true;
     }
@@ -189,7 +198,7 @@ final class TransferOperationExecutor implements AutoCloseable {
         }
         closed = true;
         try {
-            awaitCompletion(Duration.ofSeconds(10));
+            awaitCompletion(completionTimeout());
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             virtualThreads.shutdownNow();
@@ -262,7 +271,8 @@ final class TransferOperationExecutor implements AutoCloseable {
             long fee,
             boolean recordMetrics
     ) throws InterruptedException, ExecutionException, TimeoutException {
-        synchronized (sender) {
+        sender.lock.lockInterruptibly();
+        try {
             for (int attempt = 0; attempt < 2; attempt++) {
                 checkRunning();
                 long nonce = sender.nonce;
@@ -275,24 +285,22 @@ final class TransferOperationExecutor implements AutoCloseable {
                 try {
                     FullNodeClient.Submission submission = fullNodeClient.submit(transaction)
                             .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
-                    sender.nonce = Math.addExact(nonce, 1);
-                    if (recordMetrics) {
-                        accepted.incrementAndGet();
-                        if (metrics != null) {
-                            metrics.transactionAccepted();
-                        }
-                    }
-                    return new AcceptedTransfer(submission.txid(), sentAtNanos);
+                    return accepted(sender, nonce, submission.txid(), sentAtNanos, recordMetrics);
                 } catch (ExecutionException error) {
                     Throwable cause = unwrap(error);
                     if (cause instanceof LightNodeClient.NodeApiException nodeError
                             && "bad_nonce".equals(nodeError.errorCode())
                             && attempt == 0) {
+                        if (transaction.txid().equals(sender.uncertainTxid)
+                                && confirmAccepted(transaction.txid())) {
+                            return accepted(sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                        }
                         if (recordMetrics) {
                             rejected("bad_nonce");
                         }
-                        sender.nonce = lightNodeClient.getAccount(sender.wallet().address()).get(
+                        long confirmedNonce = lightNodeClient.getAccount(sender.wallet().address()).get(
                                 requestTimeout.toNanos(), TimeUnit.NANOSECONDS).nonce();
+                        sender.nonce = Math.max(sender.nonce, confirmedNonce);
                         continue;
                     }
                     if (recordMetrics) {
@@ -303,10 +311,99 @@ final class TransferOperationExecutor implements AutoCloseable {
                         }
                     }
                     throw error;
+                } catch (TimeoutException error) {
+                    if (confirmAccepted(transaction.txid())) {
+                        return accepted(sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                    }
+                    if (attempt == 0) {
+                        if (recordMetrics && metrics != null) {
+                            metrics.transactionSubmitted();
+                        }
+                        try {
+                            FullNodeClient.Submission submission = fullNodeClient.submit(transaction)
+                                    .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
+                            return accepted(
+                                    sender, nonce, submission.txid(), sentAtNanos, recordMetrics);
+                        } catch (ExecutionException retryError) {
+                            Throwable retryCause = unwrap(retryError);
+                            if (retryCause instanceof LightNodeClient.NodeApiException nodeError
+                                    && "bad_nonce".equals(nodeError.errorCode())
+                                    && confirmAccepted(transaction.txid())) {
+                                return accepted(
+                                        sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                            }
+                            if (recordMetrics) {
+                                rejected(rejectionReason(retryCause));
+                            }
+                            sender.uncertainTxid = transaction.txid();
+                            throw retryError;
+                        } catch (TimeoutException retryTimeout) {
+                            if (confirmAccepted(transaction.txid())) {
+                                return accepted(
+                                        sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                            }
+                            if (recordMetrics) {
+                                rejected("transport");
+                            }
+                            sender.uncertainTxid = transaction.txid();
+                            throw retryTimeout;
+                        }
+                    }
+                    if (recordMetrics) {
+                        rejected("transport");
+                    }
+                    sender.uncertainTxid = transaction.txid();
+                    throw error;
                 }
             }
+        } finally {
+            sender.lock.unlock();
         }
         throw new IllegalStateException("Transfer nonce retry did not complete");
+    }
+
+    private AcceptedTransfer accepted(
+            WalletState sender,
+            long nonce,
+            String txid,
+            long sentAtNanos,
+            boolean recordMetrics
+    ) {
+        sender.nonce = Math.addExact(nonce, 1);
+        sender.uncertainTxid = null;
+        if (recordMetrics) {
+            accepted.incrementAndGet();
+            if (metrics != null) {
+                metrics.transactionAccepted();
+            }
+        }
+        return new AcceptedTransfer(txid, sentAtNanos);
+    }
+
+    private boolean confirmAccepted(String txid)
+            throws InterruptedException {
+        try {
+            String status = lightNodeClient.getTransactionStatus(txid)
+                    .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS).status();
+            return "pending".equals(status) || "included".equals(status);
+        } catch (ExecutionException error) {
+            Throwable cause = unwrap(error);
+            if (cause instanceof LightNodeClient.NodeApiException nodeError
+                    && nodeError.statusCode() == 404) {
+                return false;
+            }
+            LOGGER.warn("Unable to confirm ambiguous transaction " + txid, cause);
+            return false;
+        } catch (TimeoutException error) {
+            LOGGER.warn("Timed out confirming ambiguous transaction " + txid);
+            return false;
+        }
+    }
+
+    private static String rejectionReason(Throwable error) {
+        return error instanceof LightNodeClient.NodeApiException nodeError
+                ? nodeError.errorCode()
+                : "transport";
     }
 
     private void trackInclusion(AcceptedTransfer transfer) {
@@ -350,6 +447,7 @@ final class TransferOperationExecutor implements AutoCloseable {
             throws InterruptedException, ExecutionException, TimeoutException {
         long deadline = System.nanoTime() + inclusionTimeout.toNanos();
         long acceptedAt = System.nanoTime();
+        Duration nextPoll = pollInterval;
         while (System.nanoTime() < deadline) {
             checkRunning();
             LightNodeClient.TransactionStatus status = lightNodeClient.getTransactionStatus(txid)
@@ -360,7 +458,11 @@ final class TransferOperationExecutor implements AutoCloseable {
             if ("failed".equals(status.status())) {
                 throw new IllegalStateException("Transaction " + txid + " failed before inclusion");
             }
-            Thread.sleep(pollInterval);
+            Thread.sleep(nextPoll);
+            nextPoll = Duration.ofNanos(Math.min(
+                    Math.multiplyExact(nextPoll.toNanos(), 2),
+                    MAX_POLL_INTERVAL.toNanos()
+            ));
         }
         throw new TimeoutException("Timed out waiting for " + txid + " after "
                 + Duration.ofNanos(System.nanoTime() - acceptedAt) + " for inclusion");
@@ -414,7 +516,9 @@ final class TransferOperationExecutor implements AutoCloseable {
 
     private static final class WalletState {
         private final Wallet wallet;
+        private final ReentrantLock lock = new ReentrantLock();
         private long nonce;
+        private String uncertainTxid;
 
         private WalletState(Wallet wallet, long nonce) {
             this.wallet = wallet;
