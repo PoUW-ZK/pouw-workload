@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
+import static com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.okJson;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
@@ -145,6 +146,49 @@ class TransferOperationExecutorTest {
         assertTrue(result.operations().get(ReadOperation.CHAIN_HEAD).completed() > 0);
         assertTrue(result.transfers().included() > 0);
         assertEquals(0, result.transfers().failures());
+    }
+
+    @Test
+    void retriesUnknownTxWhileAnAcceptedTransactionPropagates() throws Exception {
+        server.stubFor(get(urlPathMatching("/v1/accounts/.*"))
+                .willReturn(okJson("{\"balance\":1000000,\"nonce\":0}")));
+        server.stubFor(post("/v1/txs").willReturn(accepted()));
+        server.stubFor(get(urlEqualTo("/v1/txs/" + TXID))
+                .inScenario("unknown-tx-propagation")
+                .whenScenarioStateIs(Scenario.STARTED)
+                .willSetStateTo("funded")
+                .willReturn(okJson("{\"status\":\"included\",\"height\":20}")));
+        server.stubFor(get(urlEqualTo("/v1/txs/" + TXID))
+                .inScenario("unknown-tx-propagation")
+                .whenScenarioStateIs("funded")
+                .willSetStateTo("pending")
+                .willReturn(aResponse().withStatus(404)
+                        .withHeader("Content-Type", "application/json")
+                        .withBody("{\"error\":{\"code\":\"unknown_tx\","
+                                + "\"message\":\"transaction has not propagated\"}}")));
+        server.stubFor(get(urlEqualTo("/v1/txs/" + TXID))
+                .inScenario("unknown-tx-propagation")
+                .whenScenarioStateIs("pending")
+                .willSetStateTo("included")
+                .willReturn(okJson("{\"status\":\"pending\"}")));
+        server.stubFor(get(urlEqualTo("/v1/txs/" + TXID))
+                .inScenario("unknown-tx-propagation")
+                .whenScenarioStateIs("included")
+                .willReturn(okJson("{\"status\":\"included\",\"height\":21}")));
+
+        try (TransferOperationExecutor executor = executor(Duration.ofSeconds(1))) {
+            executor.initialize(4242);
+            assertTrue(executor.submitNext(System.nanoTime()));
+            executor.awaitCompletion(Duration.ofSeconds(2));
+
+            TransferOperationExecutor.TransferMetrics metrics = executor.snapshot();
+            assertEquals(1, metrics.accepted());
+            assertEquals(1, metrics.included());
+            assertEquals(0, metrics.failures());
+            assertTrue(metrics.rejected().isEmpty());
+        }
+
+        server.verify(4, getRequestedFor(urlEqualTo("/v1/txs/" + TXID)));
     }
 
     @Test

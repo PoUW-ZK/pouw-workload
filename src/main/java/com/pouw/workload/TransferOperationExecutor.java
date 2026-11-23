@@ -467,22 +467,34 @@ final class TransferOperationExecutor implements AutoCloseable {
         Duration nextPoll = pollInterval;
         while (System.nanoTime() < deadline) {
             checkRunning();
-            LightNodeClient.TransactionStatus status = lightNodeClient.getTransactionStatus(txid)
-                    .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
-            if ("included".equals(status.status())) {
-                return;
+            try {
+                LightNodeClient.TransactionStatus status = lightNodeClient.getTransactionStatus(txid)
+                        .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
+                if ("included".equals(status.status())) {
+                    return;
+                }
+                if ("failed".equals(status.status())) {
+                    throw new IllegalStateException("Transaction " + txid + " failed before inclusion");
+                }
+            } catch (ExecutionException error) {
+                Throwable cause = unwrap(error);
+                if (!(cause instanceof LightNodeClient.NodeApiException nodeError)
+                        || !"unknown_tx".equals(nodeError.errorCode())) {
+                    throw error;
+                }
             }
-            if ("failed".equals(status.status())) {
-                throw new IllegalStateException("Transaction " + txid + " failed before inclusion");
-            }
-            Thread.sleep(nextPoll);
-            nextPoll = Duration.ofNanos(Math.min(
-                    Math.multiplyExact(nextPoll.toNanos(), 2),
-                    MAX_POLL_INTERVAL.toNanos()
-            ));
+            nextPoll = sleepBeforeNextPoll(nextPoll);
         }
         throw new TimeoutException("Timed out waiting for " + txid + " after "
                 + Duration.ofNanos(System.nanoTime() - acceptedAt) + " for inclusion");
+    }
+
+    private Duration sleepBeforeNextPoll(Duration nextPoll) throws InterruptedException {
+        Thread.sleep(nextPoll);
+        return Duration.ofNanos(Math.min(
+                Math.multiplyExact(nextPoll.toNanos(), 2),
+                MAX_POLL_INTERVAL.toNanos()
+        ));
     }
 
     private void rejected(String reason) {
