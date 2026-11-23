@@ -170,7 +170,9 @@ public final class LightNodeClient {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("path segment must not be blank");
         }
-        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+        return URLEncoder.encode(value, StandardCharsets.UTF_8)
+                .replace("+", "%20")
+                .replace("%3A", ":");
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

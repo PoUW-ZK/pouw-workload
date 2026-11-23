@@ -4,6 +4,7 @@ import org.HdrHistogram.ConcurrentHistogram;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -285,7 +286,9 @@ final class TransferOperationExecutor implements AutoCloseable {
                 try {
                     FullNodeClient.Submission submission = fullNodeClient.submit(transaction)
                             .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
-                    return accepted(sender, nonce, submission.txid(), sentAtNanos, recordMetrics);
+                    return accepted(
+                            sender, nonce, submission.txid(), submission.node(),
+                            sentAtNanos, recordMetrics);
                 } catch (ExecutionException error) {
                     Throwable cause = unwrap(error);
                     if (cause instanceof LightNodeClient.NodeApiException nodeError
@@ -293,7 +296,9 @@ final class TransferOperationExecutor implements AutoCloseable {
                             && attempt == 0) {
                         if (transaction.txid().equals(sender.uncertainTxid)
                                 && confirmAccepted(transaction.txid())) {
-                            return accepted(sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                            return accepted(
+                                    sender, nonce, transaction.txid(), "unknown",
+                                    sentAtNanos, recordMetrics);
                         }
                         if (recordMetrics) {
                             rejected("bad_nonce");
@@ -302,6 +307,11 @@ final class TransferOperationExecutor implements AutoCloseable {
                                 requestTimeout.toNanos(), TimeUnit.NANOSECONDS).nonce();
                         sender.nonce = Math.max(sender.nonce, confirmedNonce);
                         continue;
+                    }
+                    if (cause instanceof IOException && confirmAccepted(transaction.txid())) {
+                        return accepted(
+                                sender, nonce, transaction.txid(), "unknown",
+                                sentAtNanos, recordMetrics);
                     }
                     if (recordMetrics) {
                         if (cause instanceof LightNodeClient.NodeApiException nodeError) {
@@ -313,7 +323,9 @@ final class TransferOperationExecutor implements AutoCloseable {
                     throw error;
                 } catch (TimeoutException error) {
                     if (confirmAccepted(transaction.txid())) {
-                        return accepted(sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                        return accepted(
+                                sender, nonce, transaction.txid(), "unknown",
+                                sentAtNanos, recordMetrics);
                     }
                     if (attempt == 0) {
                         if (recordMetrics && metrics != null) {
@@ -323,14 +335,16 @@ final class TransferOperationExecutor implements AutoCloseable {
                             FullNodeClient.Submission submission = fullNodeClient.submit(transaction)
                                     .get(requestTimeout.toNanos(), TimeUnit.NANOSECONDS);
                             return accepted(
-                                    sender, nonce, submission.txid(), sentAtNanos, recordMetrics);
+                                    sender, nonce, submission.txid(), submission.node(),
+                                    sentAtNanos, recordMetrics);
                         } catch (ExecutionException retryError) {
                             Throwable retryCause = unwrap(retryError);
                             if (retryCause instanceof LightNodeClient.NodeApiException nodeError
                                     && "bad_nonce".equals(nodeError.errorCode())
                                     && confirmAccepted(transaction.txid())) {
                                 return accepted(
-                                        sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                                        sender, nonce, transaction.txid(), "unknown",
+                                        sentAtNanos, recordMetrics);
                             }
                             if (recordMetrics) {
                                 rejected(rejectionReason(retryCause));
@@ -340,7 +354,8 @@ final class TransferOperationExecutor implements AutoCloseable {
                         } catch (TimeoutException retryTimeout) {
                             if (confirmAccepted(transaction.txid())) {
                                 return accepted(
-                                        sender, nonce, transaction.txid(), sentAtNanos, recordMetrics);
+                                        sender, nonce, transaction.txid(), "unknown",
+                                        sentAtNanos, recordMetrics);
                             }
                             if (recordMetrics) {
                                 rejected("transport");
@@ -366,6 +381,7 @@ final class TransferOperationExecutor implements AutoCloseable {
             WalletState sender,
             long nonce,
             String txid,
+            String node,
             long sentAtNanos,
             boolean recordMetrics
     ) {
@@ -375,6 +391,7 @@ final class TransferOperationExecutor implements AutoCloseable {
             accepted.incrementAndGet();
             if (metrics != null) {
                 metrics.transactionAccepted();
+                metrics.transactionAcceptedByNode(node);
             }
         }
         return new AcceptedTransfer(txid, sentAtNanos);

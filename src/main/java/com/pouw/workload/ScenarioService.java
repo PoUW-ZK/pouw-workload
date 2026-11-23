@@ -66,6 +66,7 @@ public final class ScenarioService {
         }
         WorkloadScenario scenario = WorkloadScenario.fromYaml(path);
         scenarioName = name;
+        metrics.scenarioActive(name, true);
         error = null;
         result = null;
         executor = null;
@@ -96,16 +97,19 @@ public final class ScenarioService {
             synchronized (this) {
                 result = completed;
                 status = "stopped";
+                metrics.scenarioActive(scenarioName, false);
             }
         } catch (CancellationException cancelled) {
             synchronized (this) {
                 status = "stopped";
+                metrics.scenarioActive(scenarioName, false);
             }
         } catch (Exception failure) {
             LOGGER.error("Scenario failed", failure);
             synchronized (this) {
                 error = failure.toString();
                 status = "error";
+                metrics.scenarioActive(scenarioName, false);
             }
         }
     }

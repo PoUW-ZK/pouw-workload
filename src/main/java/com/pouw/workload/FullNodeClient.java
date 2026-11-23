@@ -60,12 +60,14 @@ final class FullNodeClient {
                 .thenCompose(response -> {
                     if (response.statusCode() == 202) {
                         try {
-                            Submission submission = objectMapper.readValue(response.body(), Submission.class);
+                            SubmissionView submission = objectMapper.readValue(
+                                    response.body(), SubmissionView.class);
                             if (submission.txid() == null || submission.txid().isBlank()) {
                                 return CompletableFuture.failedFuture(
                                         new IOException("Full-node response did not contain a txid"));
                             }
-                            return CompletableFuture.completedFuture(submission);
+                            return CompletableFuture.completedFuture(
+                                    new Submission(submission.txid(), baseUri.getHost()));
                         } catch (IOException error) {
                             return CompletableFuture.failedFuture(error);
                         }
@@ -87,6 +89,9 @@ final class FullNodeClient {
         return baseUrl.endsWith("/") ? baseUrl : baseUrl + "/";
     }
 
-    record Submission(String txid) {
+    record Submission(String txid, String node) {
+    }
+
+    private record SubmissionView(String txid) {
     }
 }

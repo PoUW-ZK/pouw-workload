@@ -1,6 +1,7 @@
 package com.pouw.workload;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
+import com.github.tomakehurst.wiremock.http.Fault;
 import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import io.micrometer.prometheusmetrics.PrometheusConfig;
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry;
@@ -91,6 +92,8 @@ class TransferOperationExecutorTest {
             assertEquals(1, metrics.rejected().get("bad_nonce"));
             assertEquals(1, registry.get("workload.transactions.accepted").counter().count());
             assertEquals(1, registry.get("workload.transactions.included").counter().count());
+            assertEquals(1, registry.get("workload.transactions.accepted.by.node")
+                    .tag("node", "localhost").counter().count());
             assertEquals(1, registry.get("workload.transactions.rejected")
                     .tag("reason", "bad_nonce").counter().count());
             assertEquals(0, registry.get("workload.transactions.inflight").gauge().value());
@@ -207,14 +210,12 @@ class TransferOperationExecutorTest {
         server.stubFor(post("/v1/txs")
                 .inScenario("ambiguous-submit")
                 .whenScenarioStateIs("load")
-                .willReturn(aResponse().withFixedDelay(1500).withStatus(202)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"txid\":\"" + TXID + "\"}")));
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
 
-        try (TransferOperationExecutor executor = executor(Duration.ofMillis(500))) {
+        try (TransferOperationExecutor executor = executor(Duration.ofSeconds(2))) {
             executor.initialize(4242);
             assertTrue(executor.submitNext(System.nanoTime()));
-            executor.awaitCompletion(Duration.ofSeconds(5));
+            executor.awaitCompletion(Duration.ofSeconds(4));
 
             TransferOperationExecutor.TransferMetrics metrics = executor.snapshot();
             assertEquals(1, metrics.accepted());
@@ -242,9 +243,7 @@ class TransferOperationExecutorTest {
                 .inScenario("unknown-submit")
                 .whenScenarioStateIs("load-ready")
                 .willSetStateTo("confirm")
-                .willReturn(aResponse().withFixedDelay(1500).withStatus(202)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"txid\":\"" + TXID + "\"}")));
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
         server.stubFor(get(urlPathMatching("/v1/txs/.*"))
                 .inScenario("unknown-submit")
                 .whenScenarioStateIs("confirm")
@@ -252,14 +251,12 @@ class TransferOperationExecutorTest {
         server.stubFor(post("/v1/txs")
                 .inScenario("unknown-submit")
                 .whenScenarioStateIs("confirm")
-                .willReturn(aResponse().withFixedDelay(1500).withStatus(202)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\"txid\":\"" + TXID + "\"}")));
+                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
 
-        try (TransferOperationExecutor executor = executor(Duration.ofMillis(500))) {
+        try (TransferOperationExecutor executor = executor(Duration.ofSeconds(2))) {
             executor.initialize(4242);
             assertTrue(executor.submitNext(System.nanoTime()));
-            executor.awaitCompletion(Duration.ofSeconds(5));
+            executor.awaitCompletion(Duration.ofSeconds(4));
 
             TransferOperationExecutor.TransferMetrics metrics = executor.snapshot();
             assertEquals(0, metrics.accepted());

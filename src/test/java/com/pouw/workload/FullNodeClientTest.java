@@ -50,8 +50,10 @@ class FullNodeClientTest {
                 List.of(firstNode.baseUrl(), secondNode.baseUrl()), Duration.ofSeconds(2));
         TransactionCodec.SignedTransfer transaction = transaction();
 
-        assertEquals(txid, client.submit(transaction).get().txid());
-        assertEquals(txid, client.submit(transaction).get().txid());
+        assertEquals(new FullNodeClient.Submission(txid, "localhost"),
+                client.submit(transaction).get());
+        assertEquals(new FullNodeClient.Submission(txid, "localhost"),
+                client.submit(transaction).get());
 
         firstNode.verify(postRequestedFor(urlEqualTo("/v1/txs"))
                 .withRequestBody(binaryEqualTo(transaction.bytes())));

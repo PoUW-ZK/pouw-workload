@@ -85,6 +85,23 @@ class LightNodeClientTest {
     }
 
     @Test
+    void keepsColonsInTypedNodeIds() throws Exception {
+        String address = "addr:" + "11".repeat(32);
+        String txid = "tx:" + "22".repeat(32);
+        server.stubFor(get("/v1/accounts/" + address).willReturn(okJson("""
+                {"address":"addr:1111111111111111111111111111111111111111111111111111111111111111",
+                 "balance":5000,"nonce":3}
+                """)));
+        server.stubFor(get("/v1/txs/" + txid).willReturn(okJson("""
+                {"status":"included","height":100}
+                """)));
+
+        assertEquals(3, client.getNonce(address).get(2, TimeUnit.SECONDS).nonce());
+        assertEquals("included",
+                client.getTransactionStatus(txid).get(2, TimeUnit.SECONDS).status());
+    }
+
+    @Test
     void sendAsyncDoesNotBlockCallerDuringDelayedResponse() throws Exception {
         server.stubFor(get("/v1/light/head").willReturn(
                 aResponse()

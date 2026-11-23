@@ -183,4 +183,18 @@ class WorkloadScenarioTest {
         assertEquals(8, scenario.walletCount());
         assertTrue(scenario.parsedOperationMix().containsKey(ReadOperation.CHAIN_HEAD));
     }
+
+    @Test
+    void loadsSteadyAndSpikeTransferScenarios() throws Exception {
+        WorkloadScenario steady = WorkloadScenario.fromYaml(
+                Path.of("scenarios", "transfers-steady.yaml"));
+        WorkloadScenario spike = WorkloadScenario.fromYaml(
+                Path.of("scenarios", "transfers-spike.yaml"));
+
+        assertEquals(ArrivalModel.Kind.CONSTANT, steady.arrivalModel());
+        assertEquals(2, steady.transferRatePerSecond());
+        assertEquals(ArrivalModel.Kind.BURST, spike.arrivalModel());
+        assertEquals(20, spike.burstPeriodSeconds());
+        assertEquals(10, spike.transferRatePerSecond());
+    }
 }

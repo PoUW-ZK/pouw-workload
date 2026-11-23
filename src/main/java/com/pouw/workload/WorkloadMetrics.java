@@ -25,6 +25,8 @@ public final class WorkloadMetrics {
     private final Timer transactionInclusionLatency;
     private final AtomicInteger transactionInFlight = new AtomicInteger();
     private final ConcurrentHashMap<String, Counter> transactionRejected = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Counter> transactionAcceptedByNode = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, AtomicInteger> scenarioActive = new ConcurrentHashMap<>();
 
     public WorkloadMetrics(MeterRegistry registry) {
         this.registry = registry;
@@ -75,6 +77,13 @@ public final class WorkloadMetrics {
         transactionAccepted.increment();
     }
 
+    void transactionAcceptedByNode(String node) {
+        String target = node == null || node.isBlank() ? "unknown" : node;
+        transactionAcceptedByNode.computeIfAbsent(target,
+                ignored -> Counter.builder("workload.transactions.accepted.by.node")
+                        .tag("node", target).register(registry)).increment();
+    }
+
     void transactionIncluded(long nanos) {
         transactionIncluded.increment();
         transactionInclusionLatency.record(nanos, TimeUnit.NANOSECONDS);
@@ -93,5 +102,19 @@ public final class WorkloadMetrics {
 
     void transactionCompleted() {
         transactionInFlight.decrementAndGet();
+    }
+
+    void scenarioActive(String name, boolean active) {
+        if (name == null || name.isBlank()) {
+            throw new IllegalArgumentException("scenario name must not be blank");
+        }
+        AtomicInteger value = scenarioActive.computeIfAbsent(name, ignored -> {
+            AtomicInteger state = new AtomicInteger();
+            Gauge.builder("workload.scenario.active", state, AtomicInteger::get)
+                    .tag("scenario", ignored)
+                    .register(registry);
+            return state;
+        });
+        value.set(active ? 1 : 0);
     }
 }

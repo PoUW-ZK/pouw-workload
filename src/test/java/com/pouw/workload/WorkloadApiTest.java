@@ -82,6 +82,8 @@ class WorkloadApiTest {
             assertEquals(409, post(api, "/start", "{\"scenario_name\":\"test\"}").statusCode());
             assertEquals("running", json(get(api, "/api/v1/status")).path("status").asText());
             assertEquals("running", json(get(api, "/status")).path("status").asText());
+            assertEquals(1, registry.get("workload.scenario.active")
+                    .tag("scenario", "test").gauge().value());
             long firstReadDeadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
             while (registry.get("workload.reads.successful").tag("operation", "chain_head")
                     .counter().count() == 0 && System.nanoTime() < firstReadDeadline) {
@@ -97,6 +99,8 @@ class WorkloadApiTest {
             }
 
             assertEquals("stopped", json(get(api, "/status")).path("status").asText());
+            assertEquals(0, registry.get("workload.scenario.active")
+                    .tag("scenario", "test").gauge().value());
             assertTrue(json(get(api, "/status")).path("operations").path("CHAIN_HEAD").has("p50Micros"));
             assertEquals(409, post(api, "/stop", "").statusCode());
             assertTrue(get(api, "/results").body().contains("CHAIN_HEAD,"));

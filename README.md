@@ -30,7 +30,9 @@ Each wallet's nonce is read from the light node and refreshed after a
 `bad_nonce` rejection without moving it backwards while other transactions may
 still be pending. The 32 bytes of `0x01` funding seed and corresponding address
 are specific to the devnet genesis. `scenarios/transfers.yaml` combines
-transfer load with the standard read mix.
+transfer load with the standard read mix. `transfers-steady.yaml` runs a clean
+2 tx/s constant profile, while `transfers-spike.yaml` alternates between high
+and low phases around a 10 tx/s burst-model baseline.
 
 The HTTP API listens on port 8000. `GET /scenarios` lists available files;
 `POST /api/v1/start` accepts `{"scenario_name":"example"}`, `POST /api/v1/stop`
@@ -47,7 +49,8 @@ provides a one-hour, read-only chain-head workload; observe errors, latency,
 and both processes' memory in Grafana before considering a soak successful.
 `scenarios/smoke.yaml` provides a 90-second chain-head run for local integration checks.
 Transaction metrics expose submitted, accepted, included, rejected-by-reason,
-failed, in-flight, and send-to-inclusion latency. `submitted` counts HTTP
+failed, in-flight, accepted-by-node, and send-to-inclusion latency. `submitted`
+counts HTTP
 submission attempts, including retries and transfers
 whose response is ambiguous, while inclusion latency runs from the first send
 attempt to block inclusion.
