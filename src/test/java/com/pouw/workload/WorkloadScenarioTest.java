@@ -197,4 +197,21 @@ class WorkloadScenarioTest {
         assertEquals(20, spike.burstPeriodSeconds());
         assertEquals(10, spike.transferRatePerSecond());
     }
+
+    @Test
+    void transferScenariosMatchTheDemoLoadLevels() throws Exception {
+        WorkloadScenario steady = WorkloadScenario.fromYaml(
+                Path.of("scenarios", "transfers-steady.yaml"));
+        WorkloadScenario spike = WorkloadScenario.fromYaml(
+                Path.of("scenarios", "transfers-spike.yaml"));
+        WorkloadScenario high = WorkloadScenario.fromYaml(
+                Path.of("scenarios", "transfers.yaml"));
+
+        assertEquals(2, steady.transferRatePerSecond());
+        assertEquals(ArrivalModel.Kind.CONSTANT, steady.arrivalModel());
+        assertEquals(10, spike.transferRatePerSecond());
+        assertEquals(ArrivalModel.Kind.BURST, spike.arrivalModel());
+        assertEquals(20, high.transferRatePerSecond());
+        assertEquals(ArrivalModel.Kind.POISSON, high.arrivalModel());
+    }
 }

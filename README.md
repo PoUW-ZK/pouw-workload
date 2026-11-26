@@ -42,6 +42,16 @@ live per-operation statistics. The unprefixed `/start`, `/stop`, `/status` and
 stopped run. Only one run can be active at a time. Scenario names are file
 basenames under `scenarios`, not arbitrary paths.
 
+For the live-demo status view, select the stable fields explicitly:
+
+```bash
+curl -s http://localhost:8000/api/v1/status | jq '{status, scenario, transfers}'
+```
+
+On a server network, `pouw-deploy` starts the passive `transfers-steady`
+scenario through its `workload-driver`. Switching to another scenario recreates
+only that driver; the workload service itself keeps running.
+
 Prometheus can scrape `http://localhost:8001/metrics`: sent, successful,
 failed and rejected reads are counted per operation, with a latency histogram
 and an in-flight gauge. Counters accumulate across runs. `scenarios/soak.yaml`
