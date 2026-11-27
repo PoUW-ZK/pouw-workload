@@ -84,6 +84,10 @@ class WorkloadApiTest {
             assertEquals(409, post(api, "/start", "{\"scenario_name\":\"test\"}").statusCode());
             assertEquals("running", json(get(api, "/api/v1/status")).path("status").asText());
             assertEquals("running", json(get(api, "/status")).path("status").asText());
+            JsonNode liveStatus = json(get(api, "/api/v1/status"));
+            assertTrue(liveStatus.has("status"));
+            assertEquals("test", liveStatus.path("scenario").asText());
+            assertTrue(liveStatus.has("transfers"));
             assertEquals(1, registry.get("workload.scenario.active")
                     .tag("scenario", "test").gauge().value());
             long firstReadDeadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
